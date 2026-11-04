@@ -1,0 +1,77 @@
+createPost:
+  handler: src/handlers/posts.createPost
+  events:
+    - httpApi:
+        method: POST
+        path: /posts
+        authorizer:
+          name: cognitoJwt
+
+listPosts:
+  handler: src/handlers/posts.listPosts
+  events:
+    - httpApi:
+        method: GET
+        path: /posts
+
+# Routes litterales : prioritaires sur /posts/{postId}
+listMyPosts:
+  handler: src/handlers/posts.listMyPosts
+  events:
+    - httpApi:
+        method: GET
+        path: /posts/mine
+        authorizer:
+          name: cognitoJwt
+
+listReviewPosts:
+  handler: src/handlers/posts.listReviewPosts
+  events:
+    - httpApi:
+        method: GET
+        path: /posts/review
+        authorizer:
+          name: cognitoJwt
+
+getPost:
+  handler: src/handlers/posts.getPost
+  events:
+    - httpApi:
+        method: GET
+        path: /posts/{postId}
+
+previewPost:
+  handler: src/handlers/posts.previewPost
+  events:
+    - httpApi:
+        method: GET
+        path: /posts/{postId}/preview
+        authorizer:
+          name: cognitoJwt
+
+updatePost:
+  handler: src/handlers/posts.updatePost
+  events:
+    - httpApi:
+        method: PUT
+        path: /posts/{postId}
+        authorizer:
+          name: cognitoJwt
+
+publishPost:
+  handler: src/handlers/posts.publishPost
+  events:
+    - httpApi:
+        method: POST
+        path: /posts/{postId}/publish
+        authorizer:
+          name: cognitoJwt
+
+deletePost:
+  handler: src/handlers/posts.deletePost
+  events:
+    - httpApi:
+        method: DELETE
+        path: /posts/{postId}
+        authorizer:
+          name: cognitoJwt

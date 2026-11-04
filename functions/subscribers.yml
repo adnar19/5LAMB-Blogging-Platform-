@@ -1,0 +1,6 @@
+subscribe:
+  handler: src/handlers/subscribers.subscribe
+  events:
+    - httpApi:
+        method: POST
+        path: /subscribers

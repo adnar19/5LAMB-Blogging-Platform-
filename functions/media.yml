@@ -1,0 +1,34 @@
+createUploadUrl:
+  handler: src/handlers/media.createUploadUrl
+  events:
+    - httpApi:
+        method: POST
+        path: /media/upload-url
+        authorizer:
+          name: cognitoJwt
+
+listMedia:
+  handler: src/handlers/media.listMedia
+  events:
+    - httpApi:
+        method: GET
+        path: /media
+        authorizer:
+          name: cognitoJwt
+
+# Lecture publique : les medias illustrent des articles publies
+getMedia:
+  handler: src/handlers/media.getMedia
+  events:
+    - httpApi:
+        method: GET
+        path: /media/{mediaId}
+
+deleteMedia:
+  handler: src/handlers/media.deleteMedia
+  events:
+    - httpApi:
+        method: DELETE
+        path: /media/{mediaId}
+        authorizer:
+          name: cognitoJwt

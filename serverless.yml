@@ -1,0 +1,195 @@
+service: blogify
+frameworkVersion: '4'
+
+# Parametres par stage : `serverless deploy --stage dev|prod`
+params:
+  default:
+    logRetentionDays: 14
+    corsOrigins:
+      - '*'
+    siteUrl: http://localhost:3000
+    # Ressources a donnees : supprimees avec le stack en dev, conservees en prod
+    deletionPolicy: Delete
+    tableDeletionProtection: false
+    userPoolDeletionProtection: INACTIVE
+    pointInTimeRecovery: false
+    # Throttling API Gateway (requetes/seconde et rafale), global puis routes sensibles
+    throttleRate: 50
+    throttleBurst: 100
+    sensitiveRate: 2
+    sensitiveBurst: 5
+  dev: {}
+  prod:
+    logRetentionDays: 90
+    # A remplacer par l'origine reelle du frontend
+    corsOrigins:
+      - https://blogify.example.com
+    siteUrl: https://blogify.example.com
+    deletionPolicy: Retain
+    tableDeletionProtection: true
+    userPoolDeletionProtection: ACTIVE
+    pointInTimeRecovery: true
+    throttleRate: 200
+    throttleBurst: 400
+    sensitiveRate: 5
+    sensitiveBurst: 10
+
+build:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    # Bundle ESM : certaines dependances CommonJS (ex. @aws-sdk/s3-presigned-post) appellent require()
+    banner:
+      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+    # Le runtime fournit deja @aws-sdk/* ; ces paquets sont installes dans l'artefact par precaution
+    exclude:
+      - '@aws-sdk/*'
+      - '!@aws-sdk/s3-presigned-post'
+      - '!@aws-sdk/s3-request-presigner'
+      - '!@aws-sdk/util-dynamodb'
+
+package:
+  individually: true
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  architecture: arm64
+  region: eu-west-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 256
+  timeout: 10
+  logRetentionInDays: ${param:logRetentionDays}
+  tags:
+    project: blogify
+    stage: ${sls:stage}
+  environment:
+    STAGE: ${sls:stage}
+    LOG_LEVEL: ${param:logLevel, 'info'}
+    POSTS_TABLE: !Ref PostsTable
+    COMMENTS_TABLE: !Ref CommentsTable
+    MEDIA_TABLE: !Ref MediaTable
+    SEARCH_TABLE: !Ref SearchIndexTable
+    MEDIA_BUCKET: !Ref MediaBucket
+    USER_POOL_ID: !Ref UserPool
+    USER_POOL_CLIENT_ID: !Ref UserPoolClient
+    NEW_POST_TOPIC_ARN: !Ref NewPostTopic
+    SITE_URL: ${param:siteUrl}
+
+  httpApi:
+    cors:
+      allowedOrigins: ${param:corsOrigins}
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      maxAge: 3600
+    authorizers:
+      cognitoJwt:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: !Join
+          - ''
+          - - 'https://cognito-idp.${aws:region}.amazonaws.com/'
+            - !Ref UserPool
+        audience:
+          - !Ref UserPoolClient
+
+  logs:
+    httpApi: true
+
+  # Droits limites aux ressources du service (pas de Scan, pas de wildcard sur les ressources)
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Query
+            - dynamodb:BatchGetItem
+            - dynamodb:BatchWriteItem
+          Resource:
+            - !GetAtt PostsTable.Arn
+            - !GetAtt CommentsTable.Arn
+            - !GetAtt MediaTable.Arn
+            - !GetAtt SearchIndexTable.Arn
+            - !Join ['', [!GetAtt PostsTable.Arn, '/index/*']]
+            - !Join ['', [!GetAtt CommentsTable.Arn, '/index/*']]
+            - !Join ['', [!GetAtt MediaTable.Arn, '/index/*']]
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+          Resource:
+            - !Join ['', [!GetAtt MediaBucket.Arn, '/*']]
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+          Resource:
+            - !GetAtt MediaBucket.Arn
+        - Effect: Allow
+          Action:
+            - cognito-idp:AdminAddUserToGroup
+            - cognito-idp:AdminRemoveUserFromGroup
+            - cognito-idp:AdminListGroupsForUser
+            - cognito-idp:ListUsers
+          Resource:
+            - !GetAtt UserPool.Arn
+        - Effect: Allow
+          Action:
+            - sns:Publish
+            - sns:Subscribe
+          Resource:
+            - !Ref NewPostTopic
+
+functions:
+  - ${file(./functions/auth.yml)}
+  - ${file(./functions/posts.yml)}
+  - ${file(./functions/media.yml)}
+  - ${file(./functions/comments.yml)}
+  - ${file(./functions/search.yml)}
+  - ${file(./functions/subscribers.yml)}
+  - ${file(./functions/streams.yml)}
+  - ${file(./functions/docs.yml)}
+
+resources:
+  Resources: ${file(./resources/resources.yml)}
+  Outputs:
+    UserPoolId:
+      Value: !Ref UserPool
+    UserPoolClientId:
+      Value: !Ref UserPoolClient
+    MediaBucketName:
+      Value: !Ref MediaBucket
+    NewPostTopicArn:
+      Value: !Ref NewPostTopic
+  extensions:
+    # Throttling : limite globale + limites plus strictes sur les routes publiques sensibles
+    HttpApiStage:
+      Properties:
+        DefaultRouteSettings:
+          ThrottlingRateLimit: ${param:throttleRate}
+          ThrottlingBurstLimit: ${param:throttleBurst}
+        RouteSettings:
+          'POST /auth/register':
+            ThrottlingRateLimit: ${param:sensitiveRate}
+            ThrottlingBurstLimit: ${param:sensitiveBurst}
+          'POST /auth/login':
+            ThrottlingRateLimit: ${param:sensitiveRate}
+            ThrottlingBurstLimit: ${param:sensitiveBurst}
+          'POST /posts/{postId}/comments':
+            ThrottlingRateLimit: ${param:sensitiveRate}
+            ThrottlingBurstLimit: ${param:sensitiveBurst}
+          'POST /subscribers':
+            ThrottlingRateLimit: ${param:sensitiveRate}
+            ThrottlingBurstLimit: ${param:sensitiveBurst}

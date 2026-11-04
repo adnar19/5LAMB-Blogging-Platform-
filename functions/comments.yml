@@ -1,0 +1,40 @@
+createComment:
+  handler: src/handlers/comments.createComment
+  events:
+    - httpApi:
+        method: POST
+        path: /posts/{postId}/comments
+
+listComments:
+  handler: src/handlers/comments.listComments
+  events:
+    - httpApi:
+        method: GET
+        path: /posts/{postId}/comments
+
+listModerationComments:
+  handler: src/handlers/comments.listModerationComments
+  events:
+    - httpApi:
+        method: GET
+        path: /comments
+        authorizer:
+          name: cognitoJwt
+
+moderateComment:
+  handler: src/handlers/comments.moderateComment
+  events:
+    - httpApi:
+        method: PUT
+        path: /comments/{postId}/{commentId}/moderation
+        authorizer:
+          name: cognitoJwt
+
+deleteComment:
+  handler: src/handlers/comments.deleteComment
+  events:
+    - httpApi:
+        method: DELETE
+        path: /comments/{postId}/{commentId}
+        authorizer:
+          name: cognitoJwt

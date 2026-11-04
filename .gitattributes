@@ -1,0 +1,3 @@
+# Fins de ligne LF dans le depot et dans les copies de travail (Windows compris),
+# sinon `prettier --check` echoue sur un poste configure avec core.autocrlf=true.
+* text=auto eol=lf

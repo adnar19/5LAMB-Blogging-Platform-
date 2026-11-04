@@ -1,0 +1,1306 @@
+openapi: 3.0.3
+info:
+  title: Blogify API
+  version: 1.0.0
+  description: |
+    API REST d'une plateforme de blog headless (AWS Lambda, API Gateway HTTP API, DynamoDB, S3, Cognito).
+
+    **Authentification** : obtenir un jeton avec `POST /auth/login`, puis envoyer le champ `idToken`
+    dans l'en-tete `Authorization: Bearer <idToken>`. Le jeton d'acces (`accessToken`) n'est pas
+    accepte : seul l'ID token porte le nom, l'email et les groupes de l'utilisateur.
+
+    **Roles** (groupes Cognito) :
+    - `admin` : tout, y compris la gestion des utilisateurs ;
+    - `editor` : publie, modifie et supprime tous les articles, modere les commentaires ;
+    - `guest_author` : cree des articles (brouillon ou a relire) et modifie les siens tant qu'ils ne sont pas publies.
+
+    Un nouveau role n'est pris en compte qu'a partir du prochain jeton (reconnexion ou `/auth/refresh`).
+
+    **Pagination** : les listes retournent `items` et `nextToken` (`null` en fin de liste). Renvoyer
+    `nextToken` en parametre pour obtenir la page suivante.
+
+    **Erreurs** : toutes les erreurs ont la forme `{ "error": { "code", "message", "requestId" } }`.
+  license:
+    name: MIT
+    url: https://opensource.org/license/mit
+servers:
+  - url: /
+    description: Serveur courant
+tags:
+  - name: Auth
+    description: Inscription et connexion
+  - name: Admin
+    description: Gestion des utilisateurs (administrateur)
+  - name: Posts
+    description: Articles
+  - name: Media
+    description: Images et videos (stockees dans S3)
+  - name: Comments
+    description: Commentaires et moderation
+  - name: Search
+    description: Recherche d'articles
+  - name: Subscribers
+    description: Notifications par email des nouveaux articles
+security:
+  - bearerAuth: []
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Creer un compte
+      description: Cree un compte (role `guest_author`) et envoie un code de verification par email.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Compte cree, confirmation requise.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/confirm:
+    post:
+      tags: [Auth]
+      operationId: confirm
+      summary: Confirmer un compte
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '200':
+          description: Compte confirme.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Se connecter
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Jetons d'authentification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tokens'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refresh
+      summary: Renouveler les jetons
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Nouveaux jetons (sans nouveau `refreshToken`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tokens'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /admin/users:
+    get:
+      tags: [Admin]
+      operationId: listUsers
+      summary: Lister les utilisateurs
+      description: Reserve aux administrateurs.
+      parameters:
+        - $ref: '#/components/parameters/LimitUsers'
+        - $ref: '#/components/parameters/NextToken'
+      responses:
+        '200':
+          description: Page d'utilisateurs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /admin/users/{username}/role:
+    put:
+      tags: [Admin]
+      operationId: setUserRole
+      summary: Changer le role d'un utilisateur
+      description: Reserve aux administrateurs. Un administrateur ne peut pas modifier son propre role.
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetRoleRequest'
+      responses:
+        '200':
+          description: Role mis a jour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetRoleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /posts:
+    get:
+      tags: [Posts]
+      operationId: listPosts
+      summary: Lister les articles publies
+      description: Publique. Tries du plus recent au plus ancien (date de publication).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/LimitPosts'
+        - $ref: '#/components/parameters/NextToken'
+        - name: tag
+          in: query
+          description: Ne retourne que les articles portant ce tag.
+          schema:
+            type: string
+            maxLength: 30
+        - name: authorId
+          in: query
+          description: Ne retourne que les articles de cet auteur.
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Page d'articles (sans contenu).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Posts]
+      operationId: createPost
+      summary: Creer un article
+      description: |
+        Tout utilisateur authentifie. L'article est cree en `draft` (par defaut) ou `pending_review`.
+        Seul un editeur ou un administrateur peut le publier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePostRequest'
+      responses:
+        '201':
+          description: Article cree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /posts/mine:
+    get:
+      tags: [Posts]
+      operationId: listMyPosts
+      summary: Lister mes articles
+      description: Tous statuts confondus.
+      parameters:
+        - $ref: '#/components/parameters/LimitPosts'
+        - $ref: '#/components/parameters/NextToken'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PostStatus'
+      responses:
+        '200':
+          description: Page d'articles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /posts/review:
+    get:
+      tags: [Posts]
+      operationId: listReviewPosts
+      summary: Lister les articles a relire
+      description: Editeurs et administrateurs. Par defaut, les articles en attente de relecture.
+      parameters:
+        - $ref: '#/components/parameters/LimitPosts'
+        - $ref: '#/components/parameters/NextToken'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending_review, draft, archived]
+            default: pending_review
+      responses:
+        '200':
+          description: Page d'articles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /posts/{postId}:
+    parameters:
+      - $ref: '#/components/parameters/PostId'
+    get:
+      tags: [Posts]
+      operationId: getPost
+      summary: Lire un article publie
+      description: Publique. L'article est identifie par son `postId` (ULID) ou par son `slug`.
+      security: []
+      responses:
+        '200':
+          description: Article complet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Posts]
+      operationId: updatePost
+      summary: Modifier un article
+      description: |
+        L'auteur peut modifier son article tant qu'il est `draft` ou `pending_review` ; un editeur
+        ou un administrateur peut modifier tous les articles. Les changements de statut suivent les
+        transitions autorisees (voir `PostStatus`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePostRequest'
+      responses:
+        '200':
+          description: Article mis a jour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Posts]
+      operationId: deletePost
+      summary: Supprimer un article
+      description: |
+        L'auteur peut supprimer son article tant qu'il n'est pas publie ; un editeur ou un
+        administrateur peut supprimer tous les articles. Les commentaires associes sont supprimes.
+      responses:
+        '204':
+          description: Article supprime.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /posts/{postId}/preview:
+    get:
+      tags: [Posts]
+      operationId: previewPost
+      summary: Lire un article quel que soit son statut
+      description: Auteur de l'article, editeurs et administrateurs. Les autres recoivent un 404.
+      parameters:
+        - $ref: '#/components/parameters/PostId'
+      responses:
+        '200':
+          description: Article complet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /posts/{postId}/publish:
+    post:
+      tags: [Posts]
+      operationId: publishPost
+      summary: Publier un article
+      description: |
+        Editeurs et administrateurs. La publication declenche l'indexation pour la recherche et la
+        notification des abonnes. Sans effet si l'article est deja publie.
+      parameters:
+        - $ref: '#/components/parameters/PostId'
+      responses:
+        '200':
+          description: Article publie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /posts/{postId}/comments:
+    get:
+      tags: [Comments]
+      operationId: listComments
+      summary: Lister les commentaires approuves d'un article
+      description: Publique. Les plus anciens en premier.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PostId'
+        - $ref: '#/components/parameters/LimitComments'
+        - $ref: '#/components/parameters/NextToken'
+      responses:
+        '200':
+          description: Page de commentaires approuves.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicCommentPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Comments]
+      operationId: createComment
+      summary: Commenter un article
+      description: |
+        Publique. Le commentaire est cree avec le statut `pending` et n'est visible qu'apres
+        approbation par un editeur ou un administrateur.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PostId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '201':
+          description: Commentaire recu, en attente de moderation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCommentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /comments:
+    get:
+      tags: [Comments]
+      operationId: listModerationComments
+      summary: Lister les commentaires par statut
+      description: Editeurs et administrateurs. Par defaut, les commentaires en attente. Inclut l'email des auteurs.
+      parameters:
+        - $ref: '#/components/parameters/LimitComments'
+        - $ref: '#/components/parameters/NextToken'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CommentStatus'
+      responses:
+        '200':
+          description: Page de commentaires.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationCommentPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /comments/{postId}/{commentId}/moderation:
+    put:
+      tags: [Comments]
+      operationId: moderateComment
+      summary: Approuver ou rejeter un commentaire
+      description: Editeurs et administrateurs.
+      parameters:
+        - $ref: '#/components/parameters/PostId'
+        - $ref: '#/components/parameters/CommentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModerationRequest'
+      responses:
+        '200':
+          description: Commentaire mis a jour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModerationComment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /comments/{postId}/{commentId}:
+    delete:
+      tags: [Comments]
+      operationId: deleteComment
+      summary: Supprimer un commentaire
+      description: Editeurs et administrateurs.
+      parameters:
+        - $ref: '#/components/parameters/PostId'
+        - $ref: '#/components/parameters/CommentId'
+      responses:
+        '204':
+          description: Commentaire supprime.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /media/upload-url:
+    post:
+      tags: [Media]
+      operationId: createUploadUrl
+      summary: Demander une URL d'upload
+      description: |
+        Tout utilisateur authentifie. Retourne une URL S3 presignee (POST multipart) valable
+        5 minutes. Envoyer ensuite le fichier directement a S3 : les champs de `upload.fields`
+        d'abord, puis le champ `file` en dernier. Le type et la taille maximale sont imposes par S3.
+
+        Types acceptes : `image/jpeg`, `image/png`, `image/webp`, `image/gif` (10 Mo),
+        `video/mp4`, `video/webm` (100 Mo).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '201':
+          description: URL d'upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /media:
+    get:
+      tags: [Media]
+      operationId: listMedia
+      summary: Lister mes medias
+      description: Un editeur ou un administrateur peut lister les medias d'un autre utilisateur avec `ownerId`.
+      parameters:
+        - $ref: '#/components/parameters/LimitMedia'
+        - $ref: '#/components/parameters/NextToken'
+        - name: ownerId
+          in: query
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Page de medias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /media/{mediaId}:
+    parameters:
+      - $ref: '#/components/parameters/MediaId'
+    get:
+      tags: [Media]
+      operationId: getMedia
+      summary: Obtenir l'URL d'un media
+      description: |
+        Publique (les medias illustrent des articles publies). Retourne une URL de lecture
+        temporaire (1 heure). Avec `redirect=true`, repond par une redirection 302 vers cette URL,
+        utilisable directement dans une balise `<img>`.
+      security: []
+      parameters:
+        - name: redirect
+          in: query
+          schema:
+            type: string
+            enum: ['true', 'false']
+      responses:
+        '200':
+          description: URL de lecture.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUrl'
+        '302':
+          description: Redirection vers le fichier (avec `redirect=true`).
+          headers:
+            Location:
+              description: URL presignee du fichier.
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Media]
+      operationId: deleteMedia
+      summary: Supprimer un media
+      description: Proprietaire du media, editeurs et administrateurs.
+      responses:
+        '204':
+          description: Media supprime.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /search:
+    get:
+      tags: [Search]
+      operationId: searchPosts
+      summary: Rechercher des articles publies
+      description: |
+        Publique. Recherche par mots-cles dans le titre, les tags et le debut du contenu : tous les
+        mots (3 caracteres minimum, 5 au plus) doivent etre presents. La recherche ignore la casse
+        et les accents. Pas de pagination : les `limit` premiers resultats sont retournes.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - $ref: '#/components/parameters/LimitPosts'
+      responses:
+        '200':
+          description: Resultats.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /subscribers:
+    post:
+      tags: [Subscribers]
+      operationId: subscribe
+      summary: S'abonner aux nouveaux articles
+      description: |
+        Publique. Un email de confirmation est envoye ; l'abonnement n'est actif qu'apres clic sur
+        le lien. Chaque notification contient un lien de desinscription.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscribeRequest'
+      responses:
+        '202':
+          description: Email de confirmation envoye.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: ID token Cognito (champ `idToken` de `POST /auth/login`).
+  parameters:
+    PostId:
+      name: postId
+      in: path
+      required: true
+      description: Identifiant ULID de l'article (ou slug pour `GET /posts/{postId}`).
+      schema:
+        type: string
+        example: 01JABCDEFGHJKMNPQRSTVWXYZ0
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    MediaId:
+      name: mediaId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    Username:
+      name: username
+      in: path
+      required: true
+      description: Identifiant Cognito de l'utilisateur (champ `username` de `GET /admin/users`).
+      schema:
+        type: string
+        maxLength: 128
+    NextToken:
+      name: nextToken
+      in: query
+      description: Jeton de pagination retourne par la page precedente.
+      schema:
+        type: string
+        maxLength: 2048
+    LimitPosts:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 10
+    LimitMedia:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+    LimitComments:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    LimitUsers:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 60
+        default: 20
+  responses:
+    BadRequest:
+      description: Requete invalide (corps, parametres ou jeton de pagination).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentification absente, invalide ou expiree.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Role insuffisant ou action interdite sur cette ressource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ressource introuvable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Conflit (ressource existante ou modification concurrente).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Trop de requetes, reessayer plus tard.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: NOT_FOUND
+            message:
+              type: string
+              example: Post not found
+            requestId:
+              type: string
+            details:
+              description: Detail des erreurs de validation (champ et message).
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+    Message:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    Role:
+      type: string
+      enum: [admin, editor, guest_author]
+    PostStatus:
+      type: string
+      description: |
+        Cycle de vie : `draft` -> `pending_review` -> `published` -> `archived`.
+        L'auteur peut passer `draft` <-> `pending_review` ; les autres transitions
+        (publication, archivage, retour en brouillon) sont reservees aux editeurs et administrateurs.
+      enum: [draft, pending_review, published, archived]
+    CommentStatus:
+      type: string
+      enum: [pending, approved, rejected]
+      default: pending
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 128
+          description: 10 caracteres minimum, avec majuscule, minuscule, chiffre et symbole.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+    RegisterResponse:
+      type: object
+      required: [userId, confirmationRequired, message]
+      properties:
+        userId:
+          type: string
+        confirmationRequired:
+          type: boolean
+        message:
+          type: string
+    ConfirmRequest:
+      type: object
+      required: [email, code]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          description: Code a 6 chiffres recu par email.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      additionalProperties: false
+      properties:
+        refreshToken:
+          type: string
+    Tokens:
+      type: object
+      required: [tokenType, idToken, accessToken, expiresIn]
+      properties:
+        tokenType:
+          type: string
+          example: Bearer
+        idToken:
+          type: string
+          description: "A envoyer dans l'en-tete `Authorization: Bearer`."
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+          description: Absent de la reponse de `/auth/refresh`.
+        expiresIn:
+          type: integer
+          description: Duree de validite en secondes.
+    User:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        status:
+          type: string
+          example: CONFIRMED
+        enabled:
+          type: boolean
+        role:
+          $ref: '#/components/schemas/Role'
+        createdAt:
+          type: string
+          format: date-time
+    UserPage:
+      type: object
+      required: [items, nextToken]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        nextToken:
+          type: string
+          nullable: true
+    SetRoleRequest:
+      type: object
+      required: [role]
+      additionalProperties: false
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+    SetRoleResponse:
+      type: object
+      properties:
+        username:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        note:
+          type: string
+    PostSummary:
+      type: object
+      required: [postId, slug, title, status, authorId, createdAt, updatedAt]
+      properties:
+        postId:
+          type: string
+        slug:
+          type: string
+        title:
+          type: string
+        excerpt:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          $ref: '#/components/schemas/PostStatus'
+        authorId:
+          type: string
+        authorName:
+          type: string
+        coverMediaId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+    Post:
+      allOf:
+        - $ref: '#/components/schemas/PostSummary'
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: string
+              description: Contenu de l'article (texte ou Markdown, 100 000 caracteres maximum).
+    PostPage:
+      type: object
+      required: [items, nextToken]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostSummary'
+        nextToken:
+          type: string
+          nullable: true
+    CreatePostRequest:
+      type: object
+      required: [title, content]
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 150
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        excerpt:
+          type: string
+          maxLength: 300
+          description: Genere automatiquement a partir du contenu si absent.
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 30
+        coverMediaId:
+          type: string
+          description: Identifiant d'un media existant.
+        status:
+          type: string
+          enum: [draft, pending_review]
+          default: draft
+    UpdatePostRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 150
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        excerpt:
+          type: string
+          maxLength: 300
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 30
+        coverMediaId:
+          type: string
+          nullable: true
+          description: "`null` retire l'image de couverture."
+        status:
+          type: string
+          enum: [draft, pending_review, archived]
+          description: Pour publier, utiliser `POST /posts/{postId}/publish`.
+    UploadUrlRequest:
+      type: object
+      required: [filename, contentType, size]
+      additionalProperties: false
+      properties:
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: couverture.png
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp, image/gif, video/mp4, video/webm]
+        size:
+          type: integer
+          minimum: 1
+          description: Taille du fichier en octets (10 Mo pour les images, 100 Mo pour les videos).
+    UploadUrlResponse:
+      type: object
+      required: [mediaId, upload]
+      properties:
+        mediaId:
+          type: string
+        upload:
+          type: object
+          required: [method, url, fields, expiresIn]
+          properties:
+            method:
+              type: string
+              example: POST
+            url:
+              type: string
+              format: uri
+            fields:
+              type: object
+              additionalProperties:
+                type: string
+              description: Champs de formulaire a envoyer tels quels avant le champ `file`.
+            expiresIn:
+              type: integer
+              description: Duree de validite en secondes.
+    Media:
+      type: object
+      properties:
+        mediaId:
+          type: string
+        ownerId:
+          type: string
+        filename:
+          type: string
+        contentType:
+          type: string
+        size:
+          type: integer
+        status:
+          type: string
+          enum: [pending, uploaded]
+          description: '`uploaded` apres le premier `GET /media/{mediaId}` qui constate la presence du fichier.'
+        createdAt:
+          type: string
+          format: date-time
+    MediaPage:
+      type: object
+      required: [items, nextToken]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Media'
+        nextToken:
+          type: string
+          nullable: true
+    MediaUrl:
+      type: object
+      properties:
+        mediaId:
+          type: string
+        filename:
+          type: string
+        contentType:
+          type: string
+        size:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+        expiresIn:
+          type: integer
+    CreateCommentRequest:
+      type: object
+      required: [authorName, authorEmail, content]
+      additionalProperties: false
+      properties:
+        authorName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        authorEmail:
+          type: string
+          format: email
+          description: Jamais affiche publiquement.
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    CreateCommentResponse:
+      type: object
+      properties:
+        commentId:
+          type: string
+        status:
+          $ref: '#/components/schemas/CommentStatus'
+        message:
+          type: string
+    PublicComment:
+      type: object
+      properties:
+        commentId:
+          type: string
+        postId:
+          type: string
+        authorName:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    PublicCommentPage:
+      type: object
+      required: [items, nextToken]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicComment'
+        nextToken:
+          type: string
+          nullable: true
+    ModerationComment:
+      allOf:
+        - $ref: '#/components/schemas/PublicComment'
+        - type: object
+          properties:
+            authorEmail:
+              type: string
+              format: email
+            status:
+              $ref: '#/components/schemas/CommentStatus'
+            moderatedBy:
+              type: string
+            moderatedAt:
+              type: string
+              format: date-time
+    ModerationCommentPage:
+      type: object
+      required: [items, nextToken]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModerationComment'
+        nextToken:
+          type: string
+          nullable: true
+    ModerationRequest:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [approved, rejected]
+    SearchResponse:
+      type: object
+      required: [query, terms, items]
+      properties:
+        query:
+          type: string
+        terms:
+          type: array
+          description: Mots effectivement recherches (normalises).
+          items:
+            type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PostSummary'
+    SubscribeRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email

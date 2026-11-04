@@ -1,0 +1,45 @@
+register:
+  handler: src/handlers/auth.register
+  events:
+    - httpApi:
+        method: POST
+        path: /auth/register
+
+confirm:
+  handler: src/handlers/auth.confirm
+  events:
+    - httpApi:
+        method: POST
+        path: /auth/confirm
+
+login:
+  handler: src/handlers/auth.login
+  events:
+    - httpApi:
+        method: POST
+        path: /auth/login
+
+refresh:
+  handler: src/handlers/auth.refresh
+  events:
+    - httpApi:
+        method: POST
+        path: /auth/refresh
+
+listUsers:
+  handler: src/handlers/admin.listUsers
+  events:
+    - httpApi:
+        method: GET
+        path: /admin/users
+        authorizer:
+          name: cognitoJwt
+
+setUserRole:
+  handler: src/handlers/admin.setUserRole
+  events:
+    - httpApi:
+        method: PUT
+        path: /admin/users/{username}/role
+        authorizer:
+          name: cognitoJwt

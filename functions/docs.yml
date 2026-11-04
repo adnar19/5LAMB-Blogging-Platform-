@@ -1,0 +1,16 @@
+docsUi:
+  handler: src/handlers/docs.ui
+  events:
+    - httpApi:
+        method: GET
+        path: /docs
+
+openapiJson:
+  handler: src/handlers/docs.openapi
+  package:
+    patterns:
+      - docs/openapi.yaml
+  events:
+    - httpApi:
+        method: GET
+        path: /openapi.json

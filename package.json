@@ -1,0 +1,54 @@
+{
+  "name": "blogify",
+  "version": "1.0.0",
+  "description": "Blogify : plateforme de blog headless (Serverless Framework, AWS Lambda, DynamoDB, S3, Cognito)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "openapi:lint": "redocly lint docs/openapi.yaml",
+    "package": "serverless package --stage dev",
+    "deploy": "serverless deploy",
+    "info": "serverless info",
+    "remove": "serverless remove",
+    "deploy:dev": "serverless deploy --stage dev",
+    "deploy:prod": "serverless deploy --stage prod",
+    "remove:dev": "serverless remove --stage dev",
+    "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1157.0",
+    "@aws-sdk/client-dynamodb": "^3.1157.0",
+    "@aws-sdk/client-s3": "^3.1157.0",
+    "@aws-sdk/client-sns": "^3.1157.0",
+    "@aws-sdk/lib-dynamodb": "^3.1157.0",
+    "@aws-sdk/s3-presigned-post": "^3.1157.0",
+    "@aws-sdk/s3-request-presigner": "^3.1157.0",
+    "@aws-sdk/util-dynamodb": "^3.996.9",
+    "ulid": "^3.0.2",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1157.0",
+    "@eslint/js": "^10.0.1",
+    "@redocly/cli": "^2.71.2",
+    "@vitest/coverage-v8": "^5.0.5",
+    "aws-sdk-client-mock": "^4.1.0",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "serverless": "^4.45.0",
+    "vitest": "^5.0.5"
+  }
+}

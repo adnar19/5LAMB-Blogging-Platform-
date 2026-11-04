@@ -1,0 +1,315 @@
+# Ressources CloudFormation du service Blogify.
+# Sections : DynamoDB, Cognito, S3, SNS.
+
+# ---------------------------------------------------------------------------
+# DynamoDB (facturation a la demande, une table par entite)
+# ---------------------------------------------------------------------------
+
+PostsTable:
+  Type: AWS::DynamoDB::Table
+  DeletionPolicy: ${param:deletionPolicy}
+  UpdateReplacePolicy: ${param:deletionPolicy}
+  Properties:
+    TableName: ${self:service}-${sls:stage}-posts
+    BillingMode: PAY_PER_REQUEST
+    DeletionProtectionEnabled: ${param:tableDeletionProtection}
+    PointInTimeRecoverySpecification:
+      PointInTimeRecoveryEnabled: ${param:pointInTimeRecovery}
+    StreamSpecification:
+      StreamViewType: NEW_AND_OLD_IMAGES
+    AttributeDefinitions:
+      - AttributeName: postId
+        AttributeType: S
+      - AttributeName: slug
+        AttributeType: S
+      - AttributeName: authorId
+        AttributeType: S
+      - AttributeName: status
+        AttributeType: S
+      - AttributeName: createdAt
+        AttributeType: S
+      - AttributeName: updatedAt
+        AttributeType: S
+      - AttributeName: publishedAt
+        AttributeType: S
+    KeySchema:
+      - AttributeName: postId
+        KeyType: HASH
+    GlobalSecondaryIndexes:
+      # Acces par slug (lecture publique d'un article)
+      - IndexName: slug-index
+        KeySchema:
+          - AttributeName: slug
+            KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      # Articles d'un auteur (brouillons compris), du plus recent au plus ancien
+      - IndexName: author-index
+        KeySchema:
+          - AttributeName: authorId
+            KeyType: HASH
+          - AttributeName: createdAt
+            KeyType: RANGE
+        Projection:
+          ProjectionType: INCLUDE
+          NonKeyAttributes:
+            [slug, title, excerpt, tags, status, authorName, coverMediaId, updatedAt, publishedAt]
+      # Listing public : index creux, seuls les articles ayant une date de publication y figurent
+      - IndexName: status-publishedAt-index
+        KeySchema:
+          - AttributeName: status
+            KeyType: HASH
+          - AttributeName: publishedAt
+            KeyType: RANGE
+        Projection:
+          ProjectionType: INCLUDE
+          NonKeyAttributes:
+            [slug, title, excerpt, tags, authorId, authorName, coverMediaId, createdAt, updatedAt]
+      # File de relecture : articles par statut, du plus recemment modifie au plus ancien
+      - IndexName: status-updatedAt-index
+        KeySchema:
+          - AttributeName: status
+            KeyType: HASH
+          - AttributeName: updatedAt
+            KeyType: RANGE
+        Projection:
+          ProjectionType: INCLUDE
+          NonKeyAttributes:
+            [slug, title, excerpt, tags, authorId, authorName, coverMediaId, createdAt, publishedAt]
+
+CommentsTable:
+  Type: AWS::DynamoDB::Table
+  DeletionPolicy: ${param:deletionPolicy}
+  UpdateReplacePolicy: ${param:deletionPolicy}
+  Properties:
+    TableName: ${self:service}-${sls:stage}-comments
+    BillingMode: PAY_PER_REQUEST
+    DeletionProtectionEnabled: ${param:tableDeletionProtection}
+    PointInTimeRecoverySpecification:
+      PointInTimeRecoveryEnabled: ${param:pointInTimeRecovery}
+    AttributeDefinitions:
+      - AttributeName: postId
+        AttributeType: S
+      - AttributeName: commentId
+        AttributeType: S
+      - AttributeName: status
+        AttributeType: S
+      - AttributeName: createdAt
+        AttributeType: S
+    KeySchema:
+      - AttributeName: postId
+        KeyType: HASH
+      - AttributeName: commentId
+        KeyType: RANGE
+    GlobalSecondaryIndexes:
+      # File de moderation : commentaires par statut
+      - IndexName: status-index
+        KeySchema:
+          - AttributeName: status
+            KeyType: HASH
+          - AttributeName: createdAt
+            KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+
+MediaTable:
+  Type: AWS::DynamoDB::Table
+  DeletionPolicy: ${param:deletionPolicy}
+  UpdateReplacePolicy: ${param:deletionPolicy}
+  Properties:
+    TableName: ${self:service}-${sls:stage}-media
+    BillingMode: PAY_PER_REQUEST
+    DeletionProtectionEnabled: ${param:tableDeletionProtection}
+    PointInTimeRecoverySpecification:
+      PointInTimeRecoveryEnabled: ${param:pointInTimeRecovery}
+    AttributeDefinitions:
+      - AttributeName: mediaId
+        AttributeType: S
+      - AttributeName: ownerId
+        AttributeType: S
+      - AttributeName: createdAt
+        AttributeType: S
+    KeySchema:
+      - AttributeName: mediaId
+        KeyType: HASH
+    GlobalSecondaryIndexes:
+      - IndexName: owner-index
+        KeySchema:
+          - AttributeName: ownerId
+            KeyType: HASH
+          - AttributeName: createdAt
+            KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+
+# Index inverse alimente par le DynamoDB Stream de la table des articles (donnees derivees,
+# reconstructibles : jamais conservee ni protegee)
+SearchIndexTable:
+  Type: AWS::DynamoDB::Table
+  Properties:
+    TableName: ${self:service}-${sls:stage}-search-index
+    BillingMode: PAY_PER_REQUEST
+    AttributeDefinitions:
+      - AttributeName: term
+        AttributeType: S
+      - AttributeName: postId
+        AttributeType: S
+    KeySchema:
+      - AttributeName: term
+        KeyType: HASH
+      - AttributeName: postId
+        KeyType: RANGE
+
+# ---------------------------------------------------------------------------
+# Cognito (authentification, roles = groupes)
+# ---------------------------------------------------------------------------
+
+UserPool:
+  Type: AWS::Cognito::UserPool
+  DeletionPolicy: ${param:deletionPolicy}
+  UpdateReplacePolicy: ${param:deletionPolicy}
+  Properties:
+    UserPoolName: ${self:service}-${sls:stage}-users
+    DeletionProtection: ${param:userPoolDeletionProtection}
+    UsernameAttributes:
+      - email
+    UsernameConfiguration:
+      CaseSensitive: false
+    AutoVerifiedAttributes:
+      - email
+    MfaConfiguration: 'OFF'
+    AdminCreateUserConfig:
+      AllowAdminCreateUserOnly: false
+    Policies:
+      PasswordPolicy:
+        MinimumLength: 10
+        RequireLowercase: true
+        RequireUppercase: true
+        RequireNumbers: true
+        RequireSymbols: false
+    Schema:
+      - Name: email
+        AttributeDataType: String
+        Required: true
+        Mutable: true
+      - Name: name
+        AttributeDataType: String
+        Required: true
+        Mutable: true
+    AccountRecoverySetting:
+      RecoveryMechanisms:
+        - Name: verified_email
+          Priority: 1
+    VerificationMessageTemplate:
+      DefaultEmailOption: CONFIRM_WITH_CODE
+      EmailSubject: Blogify - code de verification
+      EmailMessage: 'Votre code de verification Blogify : {####}'
+
+UserPoolClient:
+  Type: AWS::Cognito::UserPoolClient
+  Properties:
+    ClientName: ${self:service}-${sls:stage}-api
+    UserPoolId: !Ref UserPool
+    GenerateSecret: false
+    ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+    PreventUserExistenceErrors: ENABLED
+    EnableTokenRevocation: true
+    AccessTokenValidity: 60
+    IdTokenValidity: 60
+    RefreshTokenValidity: 30
+    TokenValidityUnits:
+      AccessToken: minutes
+      IdToken: minutes
+      RefreshToken: days
+
+AdminGroup:
+  Type: AWS::Cognito::UserPoolGroup
+  Properties:
+    UserPoolId: !Ref UserPool
+    GroupName: admin
+    Description: Administrateurs de la plateforme
+    Precedence: 1
+
+EditorGroup:
+  Type: AWS::Cognito::UserPoolGroup
+  Properties:
+    UserPoolId: !Ref UserPool
+    GroupName: editor
+    Description: Editeurs (relecture, publication, moderation)
+    Precedence: 2
+
+GuestAuthorGroup:
+  Type: AWS::Cognito::UserPoolGroup
+  Properties:
+    UserPoolId: !Ref UserPool
+    GroupName: guest_author
+    Description: Auteurs invites (redaction de leurs propres articles)
+    Precedence: 3
+
+# ---------------------------------------------------------------------------
+# S3 (medias) : bucket prive, acces uniquement via URL presignees
+# ---------------------------------------------------------------------------
+
+MediaBucket:
+  Type: AWS::S3::Bucket
+  DeletionPolicy: ${param:deletionPolicy}
+  UpdateReplacePolicy: ${param:deletionPolicy}
+  Properties:
+    PublicAccessBlockConfiguration:
+      BlockPublicAcls: true
+      BlockPublicPolicy: true
+      IgnorePublicAcls: true
+      RestrictPublicBuckets: true
+    OwnershipControls:
+      Rules:
+        - ObjectOwnership: BucketOwnerEnforced
+    BucketEncryption:
+      ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+    CorsConfiguration:
+      CorsRules:
+        - AllowedMethods:
+            - GET
+            - HEAD
+            - POST
+          AllowedOrigins: ${param:corsOrigins}
+          AllowedHeaders:
+            - '*'
+          MaxAge: 3000
+    LifecycleConfiguration:
+      Rules:
+        - Id: abort-incomplete-multipart-uploads
+          Status: Enabled
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: 1
+
+MediaBucketPolicy:
+  Type: AWS::S3::BucketPolicy
+  Properties:
+    Bucket: !Ref MediaBucket
+    PolicyDocument:
+      Version: '2012-10-17'
+      Statement:
+        - Sid: DenyInsecureTransport
+          Effect: Deny
+          Principal: '*'
+          Action: 's3:*'
+          Resource:
+            - !GetAtt MediaBucket.Arn
+            - !Join ['', [!GetAtt MediaBucket.Arn, '/*']]
+          Condition:
+            Bool:
+              'aws:SecureTransport': 'false'
+
+# ---------------------------------------------------------------------------
+# SNS (notifications email aux abonnes)
+# ---------------------------------------------------------------------------
+
+NewPostTopic:
+  Type: AWS::SNS::Topic
+  Properties:
+    TopicName: ${self:service}-${sls:stage}-new-post
+    DisplayName: Blogify

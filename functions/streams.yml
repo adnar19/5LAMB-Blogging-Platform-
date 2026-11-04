@@ -1,0 +1,32 @@
+# Consommateurs du DynamoDB Stream de la table des articles (maximum 2 par stream)
+indexPost:
+  handler: src/handlers/streams.indexPost
+  timeout: 30
+  events:
+    - stream:
+        type: dynamodb
+        arn: !GetAtt PostsTable.StreamArn
+        batchSize: 10
+        startingPosition: LATEST
+        maximumRetryAttempts: 3
+        bisectBatchOnFunctionError: true
+        functionResponseType: ReportBatchItemFailures
+
+notifyNewPost:
+  handler: src/handlers/streams.notifyNewPost
+  timeout: 30
+  events:
+    - stream:
+        type: dynamodb
+        arn: !GetAtt PostsTable.StreamArn
+        batchSize: 10
+        startingPosition: LATEST
+        maximumRetryAttempts: 3
+        bisectBatchOnFunctionError: true
+        functionResponseType: ReportBatchItemFailures
+        filterPatterns:
+          - eventName: [INSERT, MODIFY]
+            dynamodb:
+              NewImage:
+                status:
+                  S: [published]

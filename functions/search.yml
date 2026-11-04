@@ -1,0 +1,6 @@
+searchPosts:
+  handler: src/handlers/search.searchPosts
+  events:
+    - httpApi:
+        method: GET
+        path: /search
