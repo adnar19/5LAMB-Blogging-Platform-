@@ -133,7 +133,7 @@ describe('notifyNewPost', () => {
     const lock = ddbMock.commandCalls(UpdateCommand)[0].args[0].input;
     expect(lock.ConditionExpression).toContain('attribute_not_exists(notifiedAt)');
     const message = snsMock.commandCalls(PublishCommand)[0].args[0].input;
-    expect(message.TopicArn).toBe('arn:aws:sns:eu-west-1:123456789012:new-post-test');
+    expect(message.TopicArn).toBe('arn:aws:sns:eu-north-1:123456789012:new-post-test');
     expect(message.Subject).toMatch(/^[\x20-\x7E]+$/);
     expect(message.Subject.length).toBeLessThanOrEqual(99);
     expect(message.Message).toContain(`https://blog.example.test/posts/${published.slug}`);

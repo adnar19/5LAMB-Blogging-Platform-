@@ -41,9 +41,9 @@ describe('serverless.yml', () => {
     expect(Object.keys(functions).length).toBeGreaterThan(20);
   });
 
-  it('cible Node.js sur eu-west-1', () => {
+  it('cible Node.js sur eu-north-1', () => {
     expect(serverless.provider.runtime).toMatch(/^nodejs\d+\.x$/);
-    expect(serverless.provider.region).toBe('eu-west-1');
+    expect(serverless.provider.region).toBe('eu-north-1');
   });
 
   it('definit des parametres pour les stages dev et prod', () => {

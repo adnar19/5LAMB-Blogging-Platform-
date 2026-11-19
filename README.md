@@ -13,7 +13,7 @@ Le plan de réalisation et les décisions de conception sont dans [PLAN.md](PLAN
 - Recherche plein texte par index inversé, alimenté par le DynamoDB Stream des articles.
 - Notifications par email (SNS) à chaque nouvelle publication, avec abonnement public.
 - Documentation OpenAPI 3 (`GET /docs`, `GET /openapi.json`).
-- Stages `dev` et `prod` (région `eu-west-1`) plus des stages personnels pour tester, tests unitaires, smoke test de bout en bout, CI/CD GitHub Actions.
+- Stages `dev` et `prod` (région `eu-north-1`) plus des stages personnels pour tester, tests unitaires, smoke test de bout en bout, CI/CD GitHub Actions.
 
 ## Architecture
 
@@ -73,7 +73,7 @@ Tout nouveau compte est ajouté au groupe `guest_author`. Un utilisateur sans gr
 | Compte Serverless Framework | gratuit (voir ci-dessous) | `npx serverless login`        |
 
 - **AWS CLI** : installation décrite sur <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>. Elle sert à configurer les credentials et à quelques commandes d'administration (confirmer un compte, ajouter un administrateur, vider le bucket).
-- **Compte AWS** : celui du groupe ou un compte personnel. Pour un compte de test, la politique `AdministratorAccess` est la plus simple. Sinon, il faut pouvoir gérer CloudFormation, IAM (création de rôles), Lambda, API Gateway, DynamoDB, S3, Cognito, SNS et CloudWatch Logs. Tout le projet vit dans la région `eu-west-1`.
+- **Compte AWS** : celui du groupe ou un compte personnel. Pour un compte de test, la politique `AdministratorAccess` est la plus simple. Sinon, il faut pouvoir gérer CloudFormation, IAM (création de rôles), Lambda, API Gateway, DynamoDB, S3, Cognito, SNS et CloudWatch Logs. Tout le projet vit dans la région `eu-north-1`.
 - **Compte Serverless Framework** : Serverless v4 refuse de fonctionner sans authentification. La création du compte est gratuite et se fait pendant `npx serverless login` ; l'usage est gratuit selon les conditions de licence de Serverless (voir <https://www.serverless.com/pricing>).
 - Les commandes de ce document fonctionnent dans Git Bash, WSL, macOS et Linux (bash). Les différences pour PowerShell (Windows) sont indiquées à chaque fois.
 
@@ -111,9 +111,12 @@ aws sso login --profile blogify
 
 # ou clés d'accès IAM
 aws configure --profile blogify
+
+# ou connexion avec un compte console existant (AWS CLI 2.32 ou plus) : ouvre le navigateur
+aws login --region eu-north-1 --profile blogify
 ```
 
-Utiliser `eu-west-1` comme région par défaut. Activer le profil dans le terminal courant (à refaire dans chaque nouveau terminal) :
+Utiliser `eu-north-1` comme région par défaut. Le compte AWS de l'école n'autorise que cette région (une Service Control Policy de l'organisation refuse toutes les autres) : un déploiement dans une autre région échoue avec `explicit deny in a service control policy`. Activer le profil dans le terminal courant (à refaire dans chaque nouveau terminal) :
 
 ```bash
 export AWS_PROFILE=blogify          # bash
@@ -129,7 +132,7 @@ Vérifier que le compte et l'identité affichés sont les bons :
 aws sts get-caller-identity
 ```
 
-Si la variable d'environnement `AWS_REGION` est définie sur le poste, elle doit valoir `eu-west-1`.
+Si la variable d'environnement `AWS_REGION` est définie sur le poste, elle doit valoir `eu-north-1`.
 
 **2. Serverless Framework.**
 
@@ -167,7 +170,7 @@ Le stack expose les sorties `HttpApiUrl`, `UserPoolId`, `UserPoolClientId`, `Med
 
 ```bash
 npm run info -- --stage dev-alice
-aws cloudformation describe-stacks --stack-name blogify-dev-alice --region eu-west-1 --query "Stacks[0].Outputs" --output table
+aws cloudformation describe-stacks --stack-name blogify-dev-alice --region eu-north-1 --query "Stacks[0].Outputs" --output table
 ```
 
 Pour enregistrer les trois valeurs utilisées dans la suite du document :
@@ -175,7 +178,7 @@ Pour enregistrer les trois valeurs utilisées dans la suite du document :
 ```bash
 # bash
 STACK=blogify-dev-alice
-out() { aws cloudformation describe-stacks --stack-name "$STACK" --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+out() { aws cloudformation describe-stacks --stack-name "$STACK" --region eu-north-1 --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
 API_URL=$(out HttpApiUrl)
 USER_POOL_ID=$(out UserPoolId)
 BUCKET=$(out MediaBucketName)
@@ -184,7 +187,7 @@ BUCKET=$(out MediaBucketName)
 ```powershell
 # PowerShell
 $STACK = "blogify-dev-alice"
-function Get-Output($key) { aws cloudformation describe-stacks --stack-name $STACK --region eu-west-1 --query "Stacks[0].Outputs[?OutputKey=='$key'].OutputValue" --output text }
+function Get-Output($key) { aws cloudformation describe-stacks --stack-name $STACK --region eu-north-1 --query "Stacks[0].Outputs[?OutputKey=='$key'].OutputValue" --output text }
 $API_URL = Get-Output HttpApiUrl
 $USER_POOL_ID = Get-Output UserPoolId
 $BUCKET = Get-Output MediaBucketName
@@ -227,13 +230,13 @@ Chaque stage a son propre User Pool : il faut recréer un compte administrateur 
 **2. Confirmer le compte.** Soit avec le code à 6 chiffres reçu par email (`POST /auth/confirm`), soit sans email :
 
 ```bash
-aws cognito-idp admin-confirm-sign-up --user-pool-id $USER_POOL_ID --username alice@example.com --region eu-west-1
+aws cognito-idp admin-confirm-sign-up --user-pool-id $USER_POOL_ID --username alice@example.com --region eu-north-1
 ```
 
 **3. Ajouter le compte au groupe `admin` :**
 
 ```bash
-aws cognito-idp admin-add-user-to-group --user-pool-id $USER_POOL_ID --username alice@example.com --group-name admin --region eu-west-1
+aws cognito-idp admin-add-user-to-group --user-pool-id $USER_POOL_ID --username alice@example.com --group-name admin --region eu-north-1
 ```
 
 **4. Se connecter** (`POST /auth/login`) **après** l'ajout au groupe : les rôles sont lus dans le token, un changement de rôle n'est visible qu'après une nouvelle connexion ou un `POST /auth/refresh`.
@@ -255,7 +258,7 @@ Le plus simple, sous n'importe quel système, est Swagger UI : ouvrir `<API_URL>
 ### curl (bash)
 
 ```bash
-export API_URL="https://xxxxxxxx.execute-api.eu-west-1.amazonaws.com"   # ou la valeur récupérée plus haut
+export API_URL="https://xxxxxxxx.execute-api.eu-north-1.amazonaws.com"   # ou la valeur récupérée plus haut
 export CT='Content-Type: application/json'
 ```
 
@@ -399,7 +402,7 @@ Il lit le fichier `.env` s'il existe (voir [.env.example](.env.example)) :
 
 - `SMOKE_EMAIL` : adresse de base des comptes de test, utilisés avec l'adressage `vous+label-xxxx@example.com`. Cognito envoie un email de vérification à ces adresses : choisir une vraie boîte qui accepte l'adressage `+`.
 - `SMOKE_SUBSCRIBE_EMAIL` (facultatif) : teste aussi l'abonnement ; SNS envoie alors un email de confirmation.
-- `AWS_REGION` : `eu-west-1`.
+- `AWS_REGION` : `eu-north-1`.
 
 Les credentials AWS du terminal doivent permettre `cloudformation:DescribeStacks` et l'administration du User Pool (création et confirmation de comptes, groupes). Sous PowerShell, sans fichier `.env`, les variables se définissent avec `$env:SMOKE_EMAIL = "vous@example.com"`.
 
@@ -469,7 +472,7 @@ Aucune ressource n'est facturée à l'heure : Lambda, HTTP API, DynamoDB (paieme
 Supprimer un stage personnel (le bucket S3 doit être vide, sinon CloudFormation ne peut pas le supprimer). `$BUCKET` est défini dans « Récupérer l'URL de l'API » :
 
 ```bash
-aws s3 rm "s3://$BUCKET" --recursive --region eu-west-1
+aws s3 rm "s3://$BUCKET" --recursive --region eu-north-1
 npm run remove -- --stage dev-alice
 ```
 
@@ -479,21 +482,25 @@ Pour `prod`, les tables DynamoDB et le User Pool sont en `Retain` avec protectio
 
 ## Dépannage
 
-| Symptôme                                                                        | Cause probable et solution                                                                                                                                    |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `serverless` demande de se connecter, ou « not authenticated »                  | Lancer `npx serverless login` (une fois par poste).                                                                                                           |
-| `Unable to locate credentials`, `ExpiredToken`, `security token ... invalid`    | Credentials AWS absents ou expirés : `aws sso login --profile blogify`, vérifier `$AWS_PROFILE` dans le terminal courant, puis `aws sts get-caller-identity`. |
-| Le stack n'est pas trouvé par `aws cloudformation` ou par le smoke test         | Mauvaise région ou mauvais stage : toujours `--region eu-west-1`, nom exact `blogify-<stage>`, variable `AWS_REGION` à `eu-west-1`.                           |
-| `Stack ... is in ROLLBACK_COMPLETE state` après un premier déploiement en échec | Lire l'erreur CloudFormation (console AWS, onglet Events), puis supprimer le stack avec `npm run remove -- --stage <stage>` avant de redéployer.              |
-| Erreurs de droits (`AccessDenied`, `not authorized to perform`) au déploiement  | Le profil AWS n'a pas les droits listés dans « Prérequis ».                                                                                                   |
-| `already exists` sur une ressource                                              | Un autre stack utilise déjà ce nom de stage : choisir un stage unique.                                                                                        |
-| `401` sur une route protégée                                                    | Token absent, expiré (60 min), ou `accessToken` utilisé à la place de l'`idToken`.                                                                            |
-| `403` après un changement de rôle                                               | Le rôle est lu dans le token : se reconnecter ou rafraîchir le token.                                                                                         |
-| Pas d'email de vérification                                                     | Quota de l'expéditeur Cognito par défaut ou email filtré : confirmer avec `aws cognito-idp admin-confirm-sign-up`.                                            |
-| La recherche ne trouve pas un article publié                                    | L'indexation passe par le DynamoDB Stream : attendre quelques secondes et réessayer.                                                                          |
-| L'upload S3 est refusé (`403`)                                                  | Le champ `file` doit être le dernier du formulaire, le `Content-Type` doit correspondre à celui demandé, et la taille doit respecter la limite.               |
-| `npm run format:check` échoue sur tous les fichiers sous Windows                | Fins de ligne CRLF : vérifier que `.gitattributes` est présent, puis `git add --renormalize .` et recloner si nécessaire.                                     |
-| `serverless remove` échoue sur le bucket                                        | Vider le bucket S3 avant (voir « Nettoyage »).                                                                                                                |
+| Symptôme                                                                        | Cause probable et solution                                                                                                                                           |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serverless` demande de se connecter, ou « not authenticated »                  | Lancer `npx serverless login` (une fois par poste).                                                                                                                  |
+| `Unable to locate credentials`, `ExpiredToken`, `security token ... invalid`    | Credentials AWS absents ou expirés : `aws sso login --profile blogify`, vérifier `$AWS_PROFILE` dans le terminal courant, puis `aws sts get-caller-identity`.        |
+| Le stack n'est pas trouvé par `aws cloudformation` ou par le smoke test         | Mauvaise région ou mauvais stage : toujours `--region eu-north-1`, nom exact `blogify-<stage>`, variable `AWS_REGION` à `eu-north-1`.                                |
+| `Stack ... is in ROLLBACK_COMPLETE state` après un premier déploiement en échec | Lire l'erreur CloudFormation (console AWS, onglet Events), puis supprimer le stack avec `npm run remove -- --stage <stage>` avant de redéployer.                     |
+| Erreurs de droits (`AccessDenied`, `not authorized to perform`) au déploiement  | Le profil AWS n'a pas les droits listés dans « Prérequis ».                                                                                                          |
+| `... with an explicit deny in a service control policy`                         | Région interdite par l'organisation AWS : seule `eu-north-1` est autorisée. Vérifier `aws configure get region` et ne pas passer d'autre `--region`.                 |
+| `profile "blogify" has no usable credentials`, `CreateOAuth2Token`              | Session `aws login` expirée ou non lisible par Serverless : lancer `npx serverless login aws --aws-profile blogify`.                                                 |
+| `aws: [ERROR]: Unable to parse config file`                                     | Clés en double dans `~/.aws/config` (par exemple après `serverless login aws`) : ouvrir le fichier et garder une seule ligne `login_session` et `region` par profil. |
+| `Vitest failed to find the runner` sur tous les tests sous Windows              | Terminal ouvert sur `c:\...` (lettre de lecteur en minuscule, fréquent dans VS Code) : faire `cd C:\...` avec un `C` majuscule, puis relancer `npm test`.            |
+| `already exists` sur une ressource                                              | Un autre stack utilise déjà ce nom de stage : choisir un stage unique.                                                                                               |
+| `401` sur une route protégée                                                    | Token absent, expiré (60 min), ou `accessToken` utilisé à la place de l'`idToken`.                                                                                   |
+| `403` après un changement de rôle                                               | Le rôle est lu dans le token : se reconnecter ou rafraîchir le token.                                                                                                |
+| Pas d'email de vérification                                                     | Quota de l'expéditeur Cognito par défaut ou email filtré : confirmer avec `aws cognito-idp admin-confirm-sign-up`.                                                   |
+| La recherche ne trouve pas un article publié                                    | L'indexation passe par le DynamoDB Stream : attendre quelques secondes et réessayer.                                                                                 |
+| L'upload S3 est refusé (`403`)                                                  | Le champ `file` doit être le dernier du formulaire, le `Content-Type` doit correspondre à celui demandé, et la taille doit respecter la limite.                      |
+| `npm run format:check` échoue sur tous les fichiers sous Windows                | Fins de ligne CRLF : vérifier que `.gitattributes` est présent, puis `git add --renormalize .` et recloner si nécessaire.                                            |
+| `serverless remove` échoue sur le bucket                                        | Vider le bucket S3 avant (voir « Nettoyage »).                                                                                                                       |
 
 ## Limites connues
 

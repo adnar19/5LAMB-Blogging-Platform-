@@ -56,7 +56,7 @@ provider:
   name: aws
   runtime: nodejs22.x
   architecture: arm64
-  region: eu-west-1
+  region: eu-north-1
   stage: ${opt:stage, 'dev'}
   memorySize: 256
   timeout: 10

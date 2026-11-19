@@ -1,6 +1,6 @@
 # Plan : Blogify, plateforme de blog headless (Serverless Framework + AWS Lambda)
 
-Service Serverless Framework v4 unique, en Node.js JavaScript (ESM), déployé en `eu-west-1` avec les stages `dev` et `prod`.
+Service Serverless Framework v4 unique, en Node.js JavaScript (ESM), déployé en `eu-north-1` avec les stages `dev` et `prod`.
 L'API est en HTTP API avec authorizer JWT Cognito, les rôles sont portés par les groupes Cognito, DynamoDB est en multi-tables, S3 sert aux médias et les trois fonctionnalités optionnelles sont incluses.
 
 ## Architecture
@@ -39,7 +39,7 @@ L'API est en HTTP API avec authorizer JWT Cognito, les rôles sont portés par l
 ### Phase 0 : prérequis et squelette
 
 1. Installer Node 22 et Serverless v4 (`npm i -g serverless`, puis `serverless login`), configurer les credentials AWS (SSO ou profil).
-2. Initialiser `package.json` (`"type": "module"`), `.gitignore`, `.env.example`, ESLint et Prettier, et créer `serverless.yml` (service `blogify`, `frameworkVersion: '4'`, runtime `nodejs22.x`, région `eu-west-1`, stage `${opt:stage, 'dev'}`, build esbuild).
+2. Initialiser `package.json` (`"type": "module"`), `.gitignore`, `.env.example`, ESLint et Prettier, et créer `serverless.yml` (service `blogify`, `frameworkVersion: '4'`, runtime `nodejs22.x`, région `eu-north-1`, stage `${opt:stage, 'dev'}`, build esbuild).
 3. Ajouter des `params` par stage : rétention des logs, throttling, `DeletionPolicy` Retain et PITR en prod, origines CORS. _Dépend de 2._
 
 ### Phase 1 : infrastructure (ressources CloudFormation)

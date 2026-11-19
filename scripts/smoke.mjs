@@ -4,7 +4,7 @@
  *
  *   npm run smoke -- --stage dev      (charge le fichier .env s'il existe)
  *
- * Variables : STAGE (defaut dev), AWS_REGION (defaut eu-west-1), SMOKE_EMAIL (adresse de base des
+ * Variables : STAGE (defaut dev), AWS_REGION (defaut eu-north-1), SMOKE_EMAIL (adresse de base des
  * comptes de test, defaut smoke@example.com), SMOKE_SUBSCRIBE_EMAIL (optionnel : teste aussi
  * l'abonnement, un email de confirmation SNS est alors envoye a cette adresse).
  *
@@ -24,7 +24,7 @@ const argStage = process.argv.includes('--stage')
   ? process.argv[process.argv.indexOf('--stage') + 1]
   : undefined;
 const stage = argStage ?? process.env.STAGE ?? 'dev';
-const region = process.env.AWS_REGION ?? 'eu-west-1';
+const region = process.env.AWS_REGION ?? 'eu-north-1';
 const emailBase = process.env.SMOKE_EMAIL ?? 'smoke@example.com';
 
 const run = Date.now().toString(36);
