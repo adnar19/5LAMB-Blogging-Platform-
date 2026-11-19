@@ -176,6 +176,11 @@ resources:
   extensions:
     # Throttling : limite globale + limites plus strictes sur les routes publiques sensibles
     HttpApiStage:
+      DependsOn:
+        - HttpApiRoutePostAuthRegister
+        - HttpApiRoutePostAuthLogin
+        - HttpApiRoutePostPostsPostidVarComments
+        - HttpApiRoutePostSubscribers
       Properties:
         DefaultRouteSettings:
           ThrottlingRateLimit: ${param:throttleRate}
